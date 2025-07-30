@@ -189,10 +189,21 @@ class _TrackingPageState extends State<TrackingPage> {
                   markers: devicePositions
                       .map((pos) => Marker(
                             point: pos,
-                            width: 40,
-                            height: 40,
-                            child: const Icon(Icons.location_on,
-                                color: Colors.red, size: 32),
+                            child: Container(
+                              width: 50,
+                              height: 50,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                shape: BoxShape.circle,
+                              ),
+                              child: Center(
+                                child: Icon(
+                                  Icons.circle,
+                                  color: Colors.red,
+                                  size: 38,
+                                ),
+                              ),
+                            ),
                           ))
                       .toList(),
                 ),
@@ -201,9 +212,15 @@ class _TrackingPageState extends State<TrackingPage> {
                     polygons: [
                       Polygon(
                         points: devicePositions,
-                        color: Colors.blue.withOpacity(0.3),
-                        borderStrokeWidth: 3,
-                        borderColor: Colors.blue,
+                        color: Colors.orange.withOpacity(0.2),
+                        borderStrokeWidth: 0,
+                        borderColor: Colors.transparent,
+                      ),
+                      Polygon(
+                        points: devicePositions,
+                        color: Colors.orange.withOpacity(0.5),
+                        borderStrokeWidth: 4,
+                        borderColor: Colors.orange[700]!,
                       ),
                     ],
                   ),

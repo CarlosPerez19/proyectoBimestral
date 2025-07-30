@@ -20,6 +20,7 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
   List<LatLng> devicePositions = [];
   List<Map<String, dynamic>> positionData = [];
   List<Map<String, dynamic>> onlineUsers = [];
+  List<Map<String, dynamic>> allUsers = []; // Nueva lista para todos los usuarios
   double area = 0;
   List<Map<String, dynamic>> projects = [];
   String? selectedProjectId;
@@ -27,6 +28,11 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
   Map<String, dynamic>? currentUser;
   final MapController _mapController = MapController();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  
+  // Variables para manejar las suscripciones
+  StreamSubscription? _positionsSubscription;
+  StreamSubscription? _userLocationsSubscription;
+  StreamSubscription? _userProfilesSubscription;
 
   @override
   void initState() {
@@ -38,6 +44,10 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
 
   @override
   void dispose() {
+    // Cancelar todas las suscripciones activas
+    _positionsSubscription?.cancel();
+    _userLocationsSubscription?.cancel();
+    _userProfilesSubscription?.cancel();
     locationService.dispose();
     super.dispose();
   }
@@ -133,53 +143,92 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
     }
   }
 
-  void _subscribeToPositions() {
-    try {
-      if (selectedProjectId == null) {
-        _subscribeToAllDevices();
-        return;
-      }
+  void _cancelAllSubscriptions() {
+    _positionsSubscription?.cancel();
+    _userLocationsSubscription?.cancel();
+    _userProfilesSubscription?.cancel();
+    _positionsSubscription = null;
+    _userLocationsSubscription = null;
+    _userProfilesSubscription = null;
+    print('🔄 Canceladas todas las suscripciones');
+  }
 
-      supabase
-          .from('positions')
-          .stream(primaryKey: ['id'])
-          .eq('project_id', int.parse(selectedProjectId!))
-          .listen((data) {
-            if (mounted) {
-              setState(() {
-                devicePositions = data
-                    .where(
-                      (position) =>
-                          position['latitude'] != null &&
-                          position['longitude'] != null,
-                    )
-                    .map(
-                      (position) => LatLng(
-                        (position['latitude'] as num).toDouble(),
-                        (position['longitude'] as num).toDouble(),
-                      ),
-                    )
-                    .toList();
-                positionData = List<Map<String, dynamic>>.from(data);
-              });
-              _calculateArea();
-            }
-          });
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al suscribirse a posiciones: $e')),
-        );
+  void _clearProjectData() {
+    setState(() {
+      devicePositions.clear();
+      positionData.clear();
+      area = 0;
+    });
+    print('🧹 Datos del proyecto limpiados - Puntos: ${devicePositions.length}');
+  }
+
+  void _subscribeToPositions() {
+    // Cancelar suscripciones anteriores
+    _cancelAllSubscriptions();
+    
+    // Esperar un momento para asegurar que las suscripciones se cancelen
+    Future.delayed(const Duration(milliseconds: 100), () {
+      if (!mounted) return;
+      
+      try {
+        if (selectedProjectId == null) {
+          _subscribeToAllDevices();
+          return;
+        }
+
+        print('🔄 Suscribiéndose a posiciones del proyecto: $selectedProjectId');
+        _positionsSubscription = supabase
+            .from('positions')
+            .stream(primaryKey: ['id'])
+            .eq('project_id', int.parse(selectedProjectId!))
+            .listen((data) {
+              if (mounted) {
+                print('📍 Recibidos ${data.length} puntos del proyecto $selectedProjectId');
+                
+                // Verificar que los datos pertenecen al proyecto correcto
+                final filteredData = data.where((position) {
+                  final positionProjectId = position['project_id']?.toString();
+                  return positionProjectId == selectedProjectId &&
+                         position['latitude'] != null &&
+                         position['longitude'] != null;
+                }).toList();
+                
+                print('📍 Después del filtro: ${filteredData.length} puntos válidos');
+                
+                setState(() {
+                  devicePositions = filteredData
+                      .map(
+                        (position) => LatLng(
+                          (position['latitude'] as num).toDouble(),
+                          (position['longitude'] as num).toDouble(),
+                        ),
+                      )
+                      .toList();
+                  positionData = List<Map<String, dynamic>>.from(filteredData);
+                });
+                _calculateArea();
+              }
+            }, onError: (error) {
+              print('❌ Error en suscripción de posiciones: $error');
+            });
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Error al suscribirse a posiciones: $e')),
+          );
+        }
       }
-    }
+    });
   }
 
   void _subscribeToAllDevices() {
     try {
-      supabase.from('user_locations').stream(primaryKey: ['user_id']).listen((
+      print('🔄 Suscribiéndose a todas las ubicaciones de usuarios');
+      _userLocationsSubscription = supabase.from('user_locations').stream(primaryKey: ['user_id']).listen((
         data,
       ) {
         if (mounted) {
+          print('📍 Recibidas ${data.length} ubicaciones de usuarios');
           setState(() {
             devicePositions = data
                 .where(
@@ -197,17 +246,22 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
             positionData = List<Map<String, dynamic>>.from(data);
           });
         }
+      }, onError: (error) {
+        print('❌ Error en suscripción de ubicaciones: $error');
       });
 
-      // Simplificar el stream para evitar recursión
-      supabase.from('user_profiles').stream(primaryKey: ['id']).listen((users) {
+      // Obtener información de todos los usuarios
+      _userProfilesSubscription = supabase.from('user_profiles').stream(primaryKey: ['id']).listen((users) {
         if (mounted) {
           setState(() {
+            allUsers = List<Map<String, dynamic>>.from(users); // Todos los usuarios
             onlineUsers = List<Map<String, dynamic>>.from(
               users.where((user) => user['is_online'] == true),
             );
           });
         }
+      }, onError: (error) {
+        print('❌ Error en suscripción de perfiles: $error');
       });
     } catch (e) {
       if (mounted) {
@@ -219,15 +273,18 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
   }
 
   void _calculateArea() {
+    print('📐 Calculando área - Puntos disponibles: ${devicePositions.length}');
     if (devicePositions.length >= 3) {
       double calculatedArea = _calculatePolygonArea(devicePositions);
       setState(() {
         area = calculatedArea;
       });
+      print('📐 Área calculada: ${area.toStringAsFixed(2)} m²');
     } else {
       setState(() {
         area = 0;
       });
+      print('📐 Menos de 3 puntos, área = 0');
     }
   }
 
@@ -272,6 +329,26 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
   }
 
   Future<void> _markCurrentLocation() async {
+    // Verificar si el usuario está activo/en línea
+    if (currentUser?['is_online'] != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.warning, color: Colors.white),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text('Estás INACTIVO - No puedes marcar puntos. Contacta al administrador para activarte.'),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 5),
+        ),
+      );
+      return;
+    }
+
     if (selectedProjectId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -623,6 +700,8 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
             title: const Text('Ver Dispositivos'),
             selected: selectedProjectId == null,
             onTap: () {
+              print('🔄 Cambiando a "Ver Dispositivos"');
+              _clearProjectData();
               setState(() {
                 selectedProjectId = null;
               });
@@ -637,11 +716,10 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
               title: Text(project['name']),
               selected: selectedProjectId == project['id'].toString(),
               onTap: () {
+                print('🔄 Cambiando a proyecto: ${project['name']} (ID: ${project['id']})');
+                _clearProjectData();
                 setState(() {
                   selectedProjectId = project['id'].toString();
-                  devicePositions.clear();
-                  positionData.clear();
-                  area = 0;
                 });
                 _subscribeToPositions();
                 Navigator.pop(context);
@@ -727,11 +805,10 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
               ),
             ],
             onChanged: (value) {
+              print('🔄 Dropdown - Cambiando proyecto a: $value');
+              _clearProjectData();
               setState(() {
                 selectedProjectId = value;
-                devicePositions.clear();
-                positionData.clear();
-                area = 0;
               });
               _subscribeToPositions();
             },
@@ -827,21 +904,30 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
           (user) => user['id'] == data['user_id'],
           orElse: () => {},
         );
+        
+        // Buscar información del usuario en la lista completa si no está en línea
+        var fullUserInfo = allUsers.firstWhere(
+          (user) => user['id'] == data['user_id'],
+          orElse: () => {},
+        );
 
         bool isCurrentUser = data['user_id'] == supabase.auth.currentUser?.id;
-
-        markerInfo = userInfo.isNotEmpty
-            ? '${userInfo['username'] ?? 'Usuario'}'
-            : 'Dispositivo ${index + 1}';
+        bool isUserOnline = userInfo.isNotEmpty;
 
         if (isCurrentUser) {
           markerColor = Colors.green;
-          markerInfo = 'Tú (${userInfo['username'] ?? 'Usuario'})';
+          markerInfo = 'Tú (${fullUserInfo['username'] ?? userInfo['username'] ?? 'Usuario'})';
+        } else if (isUserOnline) {
+          markerColor = Colors.blue;
+          markerInfo = '${userInfo['username'] ?? 'Usuario'}';
         } else {
-          markerColor = userInfo.isNotEmpty ? Colors.blue : Colors.orange;
+          // Usuario inactivo - color rojo
+          markerColor = Colors.red;
+          String username = fullUserInfo['username'] ?? 'Usuario ${index + 1}';
+          markerInfo = 'Inactivo - $username';
         }
 
-        markerIcon = userInfo.isNotEmpty
+        markerIcon = isUserOnline
             ? Icons.person_pin
             : Icons.phone_android;
       } else {
@@ -889,32 +975,24 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
     return Column(
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
-        // Botón principal: Marcar ubicación GPS actual
         if (selectedProjectId != null) ...[
           FloatingActionButton.extended(
             heroTag: "mark_gps",
-            backgroundColor: Colors.green[600],
+            backgroundColor: currentUser?['is_online'] == true ? Colors.green[600] : Colors.red[600],
             onPressed: _markCurrentLocation,
             icon: const Icon(Icons.gps_fixed, color: Colors.white),
             label: const Text(
-              'Marcar Punto GPS',
+              'Marcar',
               style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.bold,
               ),
             ),
-            tooltip: 'Marcar punto en tu ubicación actual',
+            tooltip: currentUser?['is_online'] == true 
+                ? 'Marcar punto en tu ubicación actual'
+                : 'No puedes marcar puntos - Estás inactivo',
           ),
           const SizedBox(height: 12),
-          FloatingActionButton(
-            heroTag: "clear",
-            mini: true,
-            backgroundColor: Colors.red[600],
-            onPressed: _clearPoints,
-            child: const Icon(Icons.clear_all, color: Colors.white),
-            tooltip: 'Limpiar puntos',
-          ),
-          const SizedBox(height: 8),
         ],
         FloatingActionButton(
           heroTag: "location",
@@ -948,41 +1026,6 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
           tooltip: 'Acercar',
         ),
       ],
-    );
-  }
-
-  void _clearPoints() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirmar'),
-        content: const Text(
-          '¿Estás seguro de que quieres limpiar todos los puntos?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar'),
-          ),
-          TextButton(
-            onPressed: () {
-              setState(() {
-                devicePositions.clear();
-                positionData.clear();
-                area = 0;
-              });
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Puntos eliminados'),
-                  backgroundColor: Colors.green,
-                ),
-              );
-            },
-            child: const Text('Confirmar'),
-          ),
-        ],
-      ),
     );
   }
 

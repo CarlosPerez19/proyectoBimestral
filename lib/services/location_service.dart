@@ -1,9 +1,7 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:device_info_plus/device_info_plus.dart';
 
 class LocationService {
   static final LocationService _instance = LocationService._internal();
@@ -16,282 +14,334 @@ class LocationService {
   
   // Variables para optimización
   Position? _lastPosition;
-  DateTime? _lastUpdateTime;
   
-  // Configuración - Actualización cada 45 segundos para no sobrecargar la BD
-  static const int _updateIntervalSeconds = 45;
-  static const LocationAccuracy _desiredAccuracy = LocationAccuracy.medium; // Cambiado a medium para mejor rendimiento
-  static const double _minimumDistanceFilter = 10.0; // Mínimo 10 metros de diferencia para actualizar
+  // Configuración optimizada
+  static const int _updateIntervalSeconds = 30; // 30 segundos para consistencia
+  static const LocationAccuracy _desiredAccuracy = LocationAccuracy.high;
 
-  /// Inicia el tracking de ubicación en tiempo real
-  Future<void> startLocationTracking() async {
-    if (_isTracking) return;
-
+  // Inicializar permisos y servicios de ubicación
+  Future<bool> initialize() async {
     try {
-      // Crear perfil de usuario si no existe
-      await _createUserProfile();
-
-      _isTracking = true;
-      
-      // Intentar obtener ubicación, pero no fallar si no se puede
-      try {
-        // Verificar permisos de ubicación
-        if (await _checkLocationPermissions()) {
-          await _updateLocation();
-        } else {
-          debugPrint('⚠️ LocationService: Permisos de ubicación no disponibles, continuando sin GPS');
-        }
-      } catch (e) {
-        debugPrint('⚠️ LocationService: GPS no disponible, continuando sin ubicación: $e');
-      }
-      
-      // Configurar timer para actualizaciones periódicas (solo si tenemos permisos)
-      _locationTimer = Timer.periodic(
-        const Duration(seconds: _updateIntervalSeconds),
-        (_) async {
-          try {
-            await _updateLocation();
-          } catch (e) {
-            debugPrint('⚠️ LocationService: Error en actualización periódica: $e');
-          }
-        },
-      );
-
-      debugPrint('🟢 LocationService: Tracking iniciado');
-    } catch (e) {
-      debugPrint('❌ LocationService: Error al iniciar tracking: $e');
-      // No relanzar el error, permitir que la app continúe
-    }
-  }
-
-  /// Detiene el tracking de ubicación
-  Future<void> stopLocationTracking() async {
-    _locationTimer?.cancel();
-    _locationTimer = null;
-    _isTracking = false;
-
-    // Marcar usuario como offline
-    try {
-      await _supabase.from('user_locations').upsert({
-        'user_id': _supabase.auth.currentUser?.id,
-        'is_online': false,
-        'last_seen': DateTime.now().toIso8601String(),
-      });
-      debugPrint('🔴 LocationService: Usuario marcado como offline');
-    } catch (e) {
-      debugPrint('❌ LocationService: Error al marcar offline: $e');
-    }
-  }
-
-  /// Actualiza la ubicación actual del usuario
-  Future<void> _updateLocation() async {
-    try {
-      if (!_isTracking) return;
-
-      final userId = _supabase.auth.currentUser?.id;
-      if (userId == null) {
-        debugPrint('❌ LocationService: Usuario no autenticado');
-        return;
-      }
-
-      debugPrint('📍 LocationService: Obteniendo ubicación actual...');
-      
-      final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: _desiredAccuracy,
-        timeLimit: const Duration(seconds: 15), // Timeout más largo para Windows
-      ).timeout(
-        const Duration(seconds: 20),
-        onTimeout: () {
-          throw Exception('Timeout obteniendo ubicación');
-        },
-      );
-
-      debugPrint('📍 LocationService: Ubicación obtenida - Lat: ${position.latitude}, Lng: ${position.longitude}');
-
-      // Optimización: Solo actualizar si hay cambio significativo
-      bool shouldUpdate = true;
-      
-      if (_lastPosition != null) {
-        final distance = Geolocator.distanceBetween(
-          _lastPosition!.latitude,
-          _lastPosition!.longitude,
-          position.latitude,
-          position.longitude,
-        );
-        
-        // Solo actualizar si se movió más de la distancia mínima
-        // O si han pasado más de 5 minutos desde la última actualización
-        final timeSinceLastUpdate = _lastUpdateTime != null 
-            ? DateTime.now().difference(_lastUpdateTime!).inMinutes 
-            : 999;
-            
-        shouldUpdate = distance >= _minimumDistanceFilter || timeSinceLastUpdate >= 5;
-      }
-
-      if (shouldUpdate) {
-        await _supabase.from('user_locations').upsert({
-          'user_id': userId,
-          'latitude': position.latitude,
-          'longitude': position.longitude,
-          'accuracy': position.accuracy,
-          'speed': position.speed,
-          'heading': position.heading,
-          'is_online': true,
-          'last_seen': DateTime.now().toIso8601String(),
-        });
-
-        // Actualizar variables de control
-        _lastPosition = position;
-        _lastUpdateTime = DateTime.now();
-
-        debugPrint('📍 LocationService: Ubicación actualizada - ${position.latitude}, ${position.longitude}');
-      } else {
-        // Solo actualizar el timestamp de last_seen para mantener online
-        await _supabase.from('user_locations').upsert({
-          'user_id': userId,
-          'is_online': true,
-          'last_seen': DateTime.now().toIso8601String(),
-        });
-        
-        debugPrint('⏰ LocationService: Solo actualizando last_seen (sin cambio de ubicación)');
-      }
-    } catch (e) {
-      debugPrint('❌ LocationService: Error al actualizar ubicación: $e');
-    }
-  }
-
-  /// Verifica y solicita permisos de ubicación
-  Future<bool> _checkLocationPermissions() async {
-    try {
-      // En Windows, los servicios de ubicación pueden estar deshabilitados
+      print('🔍 Verificando servicios de ubicación...');
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
-        debugPrint('⚠️ LocationService: Servicios de ubicación deshabilitados');
+        print('❌ Los servicios de ubicación están deshabilitados');
         return false;
       }
+      print('✅ Servicios de ubicación habilitados');
 
+      print('🔍 Verificando permisos de ubicación...');
       LocationPermission permission = await Geolocator.checkPermission();
+      print('📋 Permiso actual: $permission');
+      
       if (permission == LocationPermission.denied) {
+        print('🔐 Solicitando permisos de ubicación...');
         permission = await Geolocator.requestPermission();
+        print('📋 Nuevo permiso: $permission');
+        
         if (permission == LocationPermission.denied) {
-          debugPrint('⚠️ LocationService: Permisos de ubicación denegados');
+          print('❌ Permisos de ubicación denegados por el usuario');
           return false;
         }
       }
 
       if (permission == LocationPermission.deniedForever) {
-        debugPrint('⚠️ LocationService: Permisos de ubicación denegados permanentemente');
+        print('❌ Permisos de ubicación denegados permanentemente');
         return false;
       }
 
-      debugPrint('✅ LocationService: Permisos de ubicación concedidos');
+      print('✅ LocationService inicializado correctamente con permiso: $permission');
       return true;
     } catch (e) {
-      debugPrint('❌ LocationService: Error verificando permisos: $e');
+      print('💥 Error inicializando LocationService: $e');
       return false;
     }
   }
 
-  /// Crea o actualiza el perfil del usuario
-  Future<void> _createUserProfile() async {
+  // Iniciar seguimiento de ubicación con timer
+  Future<void> startLocationTracking() async {
+    if (_isTracking) {
+      print('⚠️ LocationService ya está ejecutándose');
+      return;
+    }
+
+    print('🚀 Iniciando LocationService...');
+    bool initialized = await initialize();
+    if (!initialized) {
+      print('❌ No se pudo inicializar LocationService');
+      return;
+    }
+
+    _isTracking = true;
+    
+    // OBTENER UBICACIÓN INICIAL INMEDIATAMENTE
+    print('📍 Obteniendo ubicación inicial...');
+    await _updateLocationPeriodic();
+    
+    // Configurar timer para actualizaciones periódicas cada 30 segundos
+    _locationTimer = Timer.periodic(
+      Duration(seconds: _updateIntervalSeconds), 
+      (timer) {
+        if (_isTracking) {
+          print('⏰ Timer activado - Actualizando ubicación automáticamente');
+          _updateLocationPeriodic();
+        } else {
+          print('⏰ Timer cancelado - LocationService detenido');
+          timer.cancel();
+        }
+      }
+    );
+
+    print('✅ LocationService iniciado correctamente - Actualizaciones cada ${_updateIntervalSeconds}s');
+  }
+
+  // Actualización periódica de ubicación
+  Future<void> _updateLocationPeriodic() async {
+    if (!_isTracking) {
+      print('⚠️ LocationService no está activo, saltando actualización');
+      return;
+    }
+
+    try {
+      print('🎯 Obteniendo nueva posición GPS...');
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: _desiredAccuracy,
+        timeLimit: Duration(seconds: 10), // Timeout de 10 segundos
+      );
+
+      print('📍 GPS obtenido: ${position.latitude}, ${position.longitude} (±${position.accuracy}m)');
+      await _processNewPosition(position);
+    } catch (e) {
+      print('❌ Error obteniendo posición GPS: $e');
+      // Intentar con menor precisión como fallback
+      try {
+        print('🔄 Reintentando con menor precisión...');
+        Position fallbackPosition = await Geolocator.getCurrentPosition(
+          desiredAccuracy: LocationAccuracy.low,
+          timeLimit: Duration(seconds: 5),
+        );
+        print('📍 GPS fallback obtenido: ${fallbackPosition.latitude}, ${fallbackPosition.longitude}');
+        await _processNewPosition(fallbackPosition);
+      } catch (fallbackError) {
+        print('💥 Error total obteniendo GPS: $fallbackError');
+      }
+    }
+  }
+
+  // Procesar nueva posición
+  Future<void> _processNewPosition(Position position) async {
+    print('🔄 Procesando nueva posición...');
+    
+    // SIEMPRE guardar la posición cuando sea llamado por el timer
+    // Esto garantiza que las ubicaciones se envíen cada 30 segundos
+    await _savePositionToDatabase(position);
+    _lastPosition = position;
+    
+    print('✅ Posición procesada y guardada exitosamente');
+  }
+
+  // Guardar posición en la base de datos
+  Future<void> _savePositionToDatabase(Position position) async {
     try {
       final user = _supabase.auth.currentUser;
-      if (user == null) return;
-
-      final deviceInfo = await _getDeviceInfo();
-
-      await _supabase.from('user_profiles').upsert({
-        'id': user.id,  // Cambio: usar 'id' en lugar de 'user_id'
-        'email': user.email,
-        'username': user.email?.split('@')[0] ?? 'Usuario',  // Cambio: usar 'username' que existe en la tabla
-        'device_info': deviceInfo,
-      });
-
-      debugPrint('👤 LocationService: Perfil de usuario actualizado');
-    } catch (e) {
-      debugPrint('❌ LocationService: Error creando perfil: $e');
-    }
-  }
-
-  /// Obtiene información del dispositivo
-  Future<Map<String, dynamic>> _getDeviceInfo() async {
-    try {
-      final deviceInfoPlugin = DeviceInfoPlugin();
-      Map<String, dynamic> deviceData = {};
-
-      if (Platform.isAndroid) {
-        final androidInfo = await deviceInfoPlugin.androidInfo;
-        deviceData = {
-          'platform': 'Android',
-          'model': androidInfo.model,
-          'manufacturer': androidInfo.manufacturer,
-          'version': androidInfo.version.release,
-          'brand': androidInfo.brand,
-        };
-      } else if (Platform.isIOS) {
-        final iosInfo = await deviceInfoPlugin.iosInfo;
-        deviceData = {
-          'platform': 'iOS',
-          'model': iosInfo.model,
-          'name': iosInfo.name,
-          'version': iosInfo.systemVersion,
-        };
-      } else if (kIsWeb) {
-        final webInfo = await deviceInfoPlugin.webBrowserInfo;
-        deviceData = {
-          'platform': 'Web',
-          'browser': webInfo.browserName.name,
-          'version': webInfo.appVersion,
-        };
-      } else {
-        deviceData = {'platform': 'Unknown'};
+      if (user == null) {
+        print('❌ No hay usuario autenticado para guardar ubicación');
+        return;
       }
 
-      return deviceData;
+      final now = DateTime.now().toIso8601String();
+
+      print('💾 === GUARDANDO UBICACIÓN ===');
+      print('👤 Usuario: ${user.id}');
+      print('📍 Lat: ${position.latitude}');
+      print('📍 Lng: ${position.longitude}');
+      print('⏰ Tiempo: $now');
+
+      // SOLO GUARDAR EN user_locations - LA TABLA CRÍTICA
+      try {
+        print('🎯 Intentando UPSERT en user_locations...');
+        
+        final result = await _supabase.from('user_locations').upsert({
+          'user_id': user.id,
+          'latitude': position.latitude,
+          'longitude': position.longitude,
+          'accuracy': position.accuracy,
+          'heading': position.heading,
+          'speed': position.speed,
+          'is_online': true,
+          'last_seen': now,
+          'updated_at': now,
+        });
+        
+        print('✅ ÉXITO: Guardado en user_locations con UPSERT');
+        print('📋 Resultado: $result');
+        
+      } catch (upsertError) {
+        print('❌ UPSERT falló: $upsertError');
+        print('🔄 Intentando INSERT como alternativa...');
+        
+        try {
+          await _supabase.from('user_locations').insert({
+            'user_id': user.id,
+            'latitude': position.latitude,
+            'longitude': position.longitude,
+            'accuracy': position.accuracy,
+            'heading': position.heading,
+            'speed': position.speed,
+            'is_online': true,
+            'last_seen': now,
+            'updated_at': now,
+          });
+          print('✅ RECUPERADO: INSERT exitoso en user_locations');
+          
+        } catch (insertError) {
+          print('💥 FALLO TOTAL: INSERT también falló: $insertError');
+          
+          // ÚLTIMO RECURSO: Intentar UPDATE
+          try {
+            final updateResult = await _supabase
+                .from('user_locations')
+                .update({
+                  'latitude': position.latitude,
+                  'longitude': position.longitude,
+                  'accuracy': position.accuracy,
+                  'heading': position.heading,
+                  'speed': position.speed,
+                  'is_online': true,
+                  'last_seen': now,
+                  'updated_at': now,
+                })
+                .eq('user_id', user.id);
+                
+            print('✅ ÚLTIMO RECURSO: UPDATE exitoso: $updateResult');
+            
+          } catch (updateError) {
+            print('� ERROR CRÍTICO: Ningún método funcionó: $updateError');
+          }
+        }
+      }
+
+      // TAMBIÉN actualizar perfil (secundario)
+      try {
+        await _supabase.from('user_profiles').upsert({
+          'id': user.id,
+          'email': user.email,
+          'username': user.email?.split('@')[0] ?? 'Usuario',
+          'is_online': true,
+          'updated_at': now,
+        });
+        print('✅ Perfil actualizado como ACTIVO');
+      } catch (profileError) {
+        print('⚠️ Error actualizando perfil (no crítico): $profileError');
+      }
+
+      print('💾 === FIN GUARDADO UBICACIÓN ===');
+      
     } catch (e) {
-      debugPrint('❌ LocationService: Error obteniendo info del dispositivo: $e');
-      return {'platform': 'Unknown'};
+      print('💥 ERROR GENERAL en _savePositionToDatabase: $e');
     }
   }
 
-  /// Obtiene ubicaciones de todos los usuarios online
-  Stream<List<Map<String, dynamic>>> getUserLocations() {
-    return _supabase
-        .from('user_locations')
-        .stream(primaryKey: ['id'])
-        .eq('is_online', true)
-        .map((data) => List<Map<String, dynamic>>.from(data));
+  // Detener seguimiento
+  Future<void> stopLocationTracking() async {
+    _isTracking = false;
+    _locationTimer?.cancel();
+    _locationTimer = null;
+    
+    if (kDebugMode) {
+      print('Seguimiento de ubicación detenido');
+    }
   }
 
-  /// Obtiene información detallada de usuarios online
-  Future<List<Map<String, dynamic>>> getOnlineUsersWithDetails() async {
+  // Obtener posición actual una sola vez (optimizado para UI)
+  Future<Position?> getCurrentPosition() async {
     try {
-      final response = await _supabase
-          .from('user_locations')
-          .select('''
-            *,
-            user_profiles (
-              display_name,
-              email,
-              avatar_url,
-              device_info
-            )
-          ''')
-          .eq('is_online', true)
-          .gte('last_seen', DateTime.now().subtract(const Duration(minutes: 2)).toIso8601String());
+      print('🎯 Iniciando getCurrentPosition...');
+      
+      bool initialized = await initialize();
+      if (!initialized) {
+        print('❌ No se pudo inicializar LocationService');
+        return null;
+      }
 
-      return List<Map<String, dynamic>>.from(response);
+      print('🔍 LocationService inicializado, obteniendo posición...');
+
+      // Estrategia 1: Intentar obtener la última posición conocida primero (muy rápido)
+      try {
+        print('📱 Intentando obtener última posición conocida...');
+        Position? lastKnown = await Geolocator.getLastKnownPosition();
+        if (lastKnown != null) {
+          DateTime now = DateTime.now();
+          Duration timeDiff = now.difference(lastKnown.timestamp);
+          
+          print('⏰ Última posición: ${timeDiff.inSeconds} segundos de antigüedad');
+          
+          // Si la última posición es reciente (menos de 2 minutos), usarla
+          if (timeDiff.inMinutes < 2) {
+            print('✅ Usando última posición conocida: ${lastKnown.latitude}, ${lastKnown.longitude}');
+            return lastKnown;
+          } else {
+            print('⚠️ Última posición muy antigua (${timeDiff.inMinutes} min), obteniendo nueva...');
+          }
+        } else {
+          print('⚠️ No hay última posición conocida disponible');
+        }
+      } catch (e) {
+        print('⚠️ Error obteniendo última posición conocida: $e');
+      }
+
+      // Estrategia 2: Obtener posición actual con diferentes niveles de precisión
+      List<LocationAccuracy> accuracyLevels = [
+        LocationAccuracy.medium,    // Rápido y generalmente suficiente
+        LocationAccuracy.low,       // Muy rápido como fallback
+        LocationAccuracy.lowest,    // Último recurso
+      ];
+
+      for (int i = 0; i < accuracyLevels.length; i++) {
+        LocationAccuracy accuracy = accuracyLevels[i];
+        int timeoutSeconds = 5 + (i * 5); // 5, 10, 15 segundos
+        
+        try {
+          print('🎯 Intento ${i + 1}/3 - Precisión: $accuracy, Timeout: ${timeoutSeconds}s');
+          
+          Position position = await Geolocator.getCurrentPosition(
+            desiredAccuracy: accuracy,
+            timeLimit: Duration(seconds: timeoutSeconds),
+          );
+          
+          print('✅ ¡Posición obtenida exitosamente!');
+          print('📍 Coordenadas: ${position.latitude}, ${position.longitude}');
+          print('🎯 Precisión: ${position.accuracy}m');
+          print('⏰ Timestamp: ${position.timestamp}');
+          
+          return position;
+          
+        } catch (e) {
+          print('❌ Intento ${i + 1} falló con $accuracy: $e');
+          if (i == accuracyLevels.length - 1) {
+            // Último intento falló
+            print('💥 Todos los intentos de obtener posición fallaron');
+          } else {
+            print('🔄 Intentando con menor precisión...');
+          }
+        }
+      }
+
+      print('❌ No se pudo obtener posición GPS con ningún método');
+      return null;
+      
     } catch (e) {
-      debugPrint('❌ LocationService: Error obteniendo usuarios online: $e');
-      return [];
+      print('💥 Error general en getCurrentPosition: $e');
+      return null;
     }
   }
 
-  /// Verifica si el servicio está activo
-  bool get isTracking => _isTracking;
-
-  /// Libera recursos
+  // Limpiar recursos
   void dispose() {
     stopLocationTracking();
   }
+
+  // Getters para estado
+  bool get isTracking => _isTracking;
+  Position? get lastKnownPosition => _lastPosition;
 }

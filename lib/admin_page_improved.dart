@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
+import 'dart:async';
 import 'tracking_page_improved.dart';
 import 'main.dart'; // Para AuthGate
 
@@ -20,17 +19,22 @@ class _AdminPageImprovedState extends State<AdminPageImproved> with TickerProvid
   List<Map<String, dynamic>> onlineUsers = [];
   List<Map<String, dynamic>> projects = [];
   bool isLoading = true;
+  
+  // Timer para actualizar ubicaciones cada 30 segundos
+  Timer? _locationUpdateTimer;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 3, vsync: this);
     _loadData();
+    _startLocationUpdateTimer(); // Iniciar timer automático
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _locationUpdateTimer?.cancel(); // Cancelar timer al salir
     super.dispose();
   }
 
@@ -40,6 +44,18 @@ class _AdminPageImprovedState extends State<AdminPageImproved> with TickerProvid
       _loadOnlineUsers(),
       _loadProjects(),
     ]);
+  }
+
+  // Método para iniciar el timer de actualización automática cada 30 segundos
+  void _startLocationUpdateTimer() {
+    _locationUpdateTimer = Timer.periodic(const Duration(seconds: 30), (timer) async {
+      print('🔄 AdminPage: Actualizando ubicaciones automáticamente');
+      await _loadOnlineUsers(); // Recargar usuarios online cada 30 segundos
+      if (mounted) {
+        setState(() {}); // Forzar actualización de la UI
+      }
+    });
+    print('⏰ AdminPage: Timer de actualización iniciado (30 segundos)');
   }
 
   Future<void> _loadUsers() async {
@@ -91,6 +107,7 @@ class _AdminPageImprovedState extends State<AdminPageImproved> with TickerProvid
 
   Future<void> _loadOnlineUsers() async {
     try {
+      print('🔄 AdminPage: Cargando usuarios online...');
       // Obtener ubicaciones activas con información del usuario
       final locations = await supabase
           .from('user_locations')
@@ -123,14 +140,19 @@ class _AdminPageImprovedState extends State<AdminPageImproved> with TickerProvid
         };
       }).toList();
 
-      setState(() {
-        onlineUsers = combinedData;
-      });
+      if (mounted) {
+        setState(() {
+          onlineUsers = combinedData;
+        });
+        print('✅ AdminPage: ${combinedData.length} usuarios online actualizados - ${DateTime.now().toString().substring(11, 19)}');
+      }
     } catch (e) {
-      print('Error cargando usuarios online: $e');
-      setState(() {
-        onlineUsers = [];
-      });
+      print('❌ AdminPage: Error cargando usuarios online: $e');
+      if (mounted) {
+        setState(() {
+          onlineUsers = [];
+        });
+      }
     }
   }
 
@@ -517,7 +539,6 @@ class _AdminPageImprovedState extends State<AdminPageImproved> with TickerProvid
     int adminUsers = users.where((user) => user['role'] == 'admin').length;
     int regularUsers = users.where((user) => user['role'] == 'user').length;
     int totalProjects = projects.length;
-    int onlineUsersCount = onlineUsers.length;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -576,6 +597,118 @@ class _AdminPageImprovedState extends State<AdminPageImproved> with TickerProvid
             ],
           ),
           
+          const SizedBox(height: 24),
+          
+          // Dispositivos conectados en tiempo real
+          Card(
+            elevation: 4,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.devices, color: Colors.blue),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Dispositivos Conectados: ${onlineUsers.length}',
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.green,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                color: Colors.white,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            const Text(
+                              'EN VIVO',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  if (onlineUsers.isEmpty)
+                    const Center(
+                      child: Column(
+                        children: [
+                          Icon(Icons.location_off, size: 48, color: Colors.grey),
+                          SizedBox(height: 8),
+                          Text(
+                            'No hay dispositivos conectados',
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                          SizedBox(height: 4),
+                          Text(
+                            'Se actualiza automáticamente cada 30 segundos',
+                            style: TextStyle(fontSize: 12, color: Colors.grey),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    Column(
+                      children: onlineUsers.take(5).map((user) {
+                        final username = user['user_profiles']?['username'] ?? 'Usuario';
+                        final coords = '${user['latitude'].toStringAsFixed(6)}, ${user['longitude'].toStringAsFixed(6)}';
+                        final accuracy = user['accuracy']?.toStringAsFixed(1) ?? 'N/A';
+                        final lastSeen = user['last_seen'] != null 
+                            ? DateTime.parse(user['last_seen']).toLocal().toString().substring(11, 19)
+                            : 'N/A';
+                        
+                        return ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor: Colors.green[100],
+                            child: const Icon(Icons.person_pin_circle, color: Colors.green),
+                          ),
+                          title: Text(username),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('📍 $coords'),
+                              Text('🎯 Precisión: ${accuracy}m • 🕒 $lastSeen'),
+                            ],
+                          ),
+                          trailing: Container(
+                            width: 12,
+                            height: 12,
+                            decoration: const BoxDecoration(
+                              color: Colors.green,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          isThreeLine: true,
+                        );
+                      }).toList(),
+                    ),
+                ],
+              ),
+            ),
+          ),
+         
           const SizedBox(height: 24),
          
           // Proyectos recientes
@@ -1048,9 +1181,9 @@ class _AdminPageImprovedState extends State<AdminPageImproved> with TickerProvid
           ListTile(
             leading: const Icon(Icons.folder),
             title: const Text('Proyectos'),
-            selected: _tabController.index == 3,
+            selected: _tabController.index == 2,
             onTap: () {
-              _tabController.animateTo(3);
+              _tabController.animateTo(2);
               Navigator.pop(context);
             },
           ),

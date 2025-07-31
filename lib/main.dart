@@ -6,10 +6,13 @@ import 'admin_page_improved.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Inicializar Supabase
   await Supabase.initialize(
     url: 'https://flirdfwwgaaohzbxnpju.supabase.co',
     anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZsaXJkZnd3Z2Fhb2h6YnhucGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg2NDcyOTYsImV4cCI6MjA2NDIyMzI5Nn0.kZj7S6-l7No1gTE5Hb5ETGSj-cdNDZC1N8JJubYsuDg',
   );
+  
   runApp(const MyApp());
 }
 

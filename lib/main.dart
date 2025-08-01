@@ -3,15 +3,17 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'login_page.dart';
 import 'tracking_page_improved.dart';
 import 'admin_page_improved.dart';
+import 'services/simple_background_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // Inicializar Supabase
+
   await Supabase.initialize(
     url: 'https://flirdfwwgaaohzbxnpju.supabase.co',
     anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZsaXJkZnd3Z2Fhb2h6YnhucGp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDg2NDcyOTYsImV4cCI6MjA2NDIyMzI5Nn0.kZj7S6-l7No1gTE5Hb5ETGSj-cdNDZC1N8JJubYsuDg',
   );
+  
+  await SimpleBackgroundService.initialize();
   
   runApp(const MyApp());
 }
@@ -97,7 +99,6 @@ class _RoleBasedRouterState extends State<RoleBasedRouter> {
     try {
       final user = Supabase.instance.client.auth.currentUser;
       if (user != null) {
-        // Consultar directamente la tabla user_roles
         final response = await Supabase.instance.client
             .from('user_roles')
             .select('role')
@@ -105,7 +106,6 @@ class _RoleBasedRouterState extends State<RoleBasedRouter> {
             .maybeSingle();
         
         if (response != null) {
-          // Manejo seguro del tipo de datos
           final roleValue = response['role'];
           final roleString = roleValue != null ? roleValue.toString() : 'user';
           
@@ -114,7 +114,6 @@ class _RoleBasedRouterState extends State<RoleBasedRouter> {
             isLoading = false;
           });
         } else {
-          // Si no existe rol, crear uno por defecto
           try {
             await Supabase.instance.client
                 .from('user_roles')
@@ -140,7 +139,7 @@ class _RoleBasedRouterState extends State<RoleBasedRouter> {
     } catch (e) {
       print('Error obteniendo rol: $e');
       setState(() {
-        userRole = 'user'; // Default role si hay error
+        userRole = 'user'; 
         isLoading = false;
       });
     }
@@ -173,7 +172,6 @@ class _RoleBasedRouterState extends State<RoleBasedRouter> {
       );
     }
 
-    // Mostrar la pantalla según el rol del usuario
     if (userRole == 'admin') {
       return const AdminPageImproved();
     } else {

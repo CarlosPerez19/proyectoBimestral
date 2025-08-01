@@ -5,7 +5,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'dart:async';
 import './services/location_service.dart';
-import './services/background_location_service.dart';
+import './services/simple_background_service.dart';
 import 'admin_page_improved.dart';
 
 class TrackingPageImproved extends StatefulWidget {
@@ -18,11 +18,10 @@ class TrackingPageImproved extends StatefulWidget {
 class _TrackingPageImprovedState extends State<TrackingPageImproved> {
   final supabase = Supabase.instance.client;
   late final LocationService locationService;
-  final backgroundLocationService = BackgroundLocationService();
   List<LatLng> devicePositions = [];
   List<Map<String, dynamic>> positionData = [];
   List<Map<String, dynamic>> onlineUsers = [];
-  List<Map<String, dynamic>> allUsers = []; // Nueva lista para todos los usuarios
+  List<Map<String, dynamic>> allUsers = []; 
   double area = 0;
   List<Map<String, dynamic>> projects = [];
   String? selectedProjectId;
@@ -31,31 +30,105 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
   final MapController _mapController = MapController();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
   
-  // Variables para manejar las suscripciones
   StreamSubscription? _positionsSubscription;
   StreamSubscription? _userLocationsSubscription;
   StreamSubscription? _userProfilesSubscription;
-  Timer? _locationUpdateTimer; // Timer para actualizaciones automáticas cada 30s
-  DateTime? _lastUpdateTime; // Tiempo de última actualización
+  Timer? _locationUpdateTimer; 
+  DateTime? _lastUpdateTime; 
 
   @override
   void initState() {
     super.initState();
     locationService = LocationService();
+    _checkLocationPermissions(); 
     _loadUserProfile();
     _loadProjects();
     _startLocationService();
   }
 
+  Future<void> _checkLocationPermissions() async {
+    try {
+      final status = await SimpleBackgroundService.getLocationStatus();
+      debugPrint('📱 Estado de ubicación: $status');
+      
+      if (!status['serviceEnabled']) {
+        _showLocationServiceDialog();
+        return;
+      }
+      
+      final permission = status['permission'];
+      if (permission.contains('denied')) {
+        _showPermissionDialog();
+      }
+    } catch (e) {
+      debugPrint('❌ Error verificando permisos: $e');
+    }
+  }
+
+  void _showLocationServiceDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('GPS Desactivado'),
+        content: const Text(
+          'El servicio de GPS está desactivado. Por favor, actívalo en la configuración de tu dispositivo para usar esta aplicación.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await Geolocator.openLocationSettings();
+            },
+            child: const Text('Abrir Configuración'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showPermissionDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Permisos de Ubicación'),
+        content: const Text(
+          'Esta aplicación necesita acceso a tu ubicación para funcionar correctamente. Por favor, concede los permisos necesarios.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              final permission = await SimpleBackgroundService.requestLocationPermission();
+              if (permission != LocationPermission.denied && 
+                  permission != LocationPermission.deniedForever) {
+                _startLocationService();
+              }
+            },
+            child: const Text('Conceder Permisos'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
-    // Cancelar todas las suscripciones activas
+
     _positionsSubscription?.cancel();
     _userLocationsSubscription?.cancel();
     _userProfilesSubscription?.cancel();
-    _locationUpdateTimer?.cancel(); // Cancelar timer de ubicación
+    _locationUpdateTimer?.cancel(); 
     locationService.dispose();
-    backgroundLocationService.dispose();
     super.dispose();
   }
 
@@ -65,14 +138,12 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
       if (user != null) {
         debugPrint('👤 Cargando perfil para usuario: ${user.id}');
         
-        // Cargar perfil básico
         final profile = await supabase
             .from('user_profiles')
             .select('*')
             .eq('id', user.id)
             .maybeSingle();
 
-        // Cargar rol por separado
         final roleData = await supabase
             .from('user_roles')
             .select('role')
@@ -87,14 +158,13 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
           });
         } else {
           debugPrint('⚠️ Perfil no existe, creando nuevo perfil...');
-          // Crear perfil si no existe
           final now = DateTime.now().toIso8601String();
           
           await supabase.from('user_profiles').upsert({
             'id': user.id,
             'email': user.email,
             'username': user.email?.split('@')[0] ?? 'Usuario',
-            'is_online': true, // IMPORTANTE: Activar inmediatamente
+            'is_online': true, 
             'created_at': now,
             'updated_at': now,
           });
@@ -111,7 +181,7 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
               'id': user.id,
               'email': user.email,
               'username': user.email?.split('@')[0] ?? 'Usuario',
-              'is_online': true, // Usuario nuevo = activo por defecto
+              'is_online': true, 
               'role': 'user',
             };
             userRole = 'user';
@@ -120,7 +190,6 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
           debugPrint('🎉 USUARIO NUEVO LISTO - Debería aparecer en el mapa');
         }
         
-        // EXTRA: Asegurar que el usuario aparezca como activo
         if (currentUser?['is_online'] != true) {
           debugPrint('🔄 Activando usuario que estaba inactivo...');
           await supabase.from('user_profiles').update({
@@ -145,30 +214,25 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
     try {
       debugPrint('🚀 INICIANDO SERVICIOS DE UBICACIÓN...');
       
-      // PASO 1: Iniciar LocationService principal
       debugPrint('📱 Iniciando LocationService principal...');
       await locationService.startLocationTracking();
       debugPrint('✅ LocationService principal iniciado');
       
-      // PASO 2: Iniciar BackgroundLocationService
-      debugPrint('📱 Iniciando BackgroundLocationService...');
-      await backgroundLocationService.startBackgroundTracking();
-      debugPrint('✅ BackgroundLocationService iniciado');
+      debugPrint('🌟 Iniciando SimpleBackgroundService...');
+      await SimpleBackgroundService.startBackgroundTracking();
+      debugPrint('✅ SimpleBackgroundService iniciado');
       
       debugPrint('✅ Servicios de ubicación iniciados (foreground + background)');
       debugPrint('🔄 Las ubicaciones se actualizarán automáticamente cada 30 segundos');
       
-      // PASO 3: Forzar actualización inicial de ubicación
       debugPrint('🚀 Forzando actualización inicial...');
       await _forceLocationUpdate();
       
-      // PASO 4: Verificar que el timer del LocationService esté funcionando
       debugPrint('⏰ Verificando que el timer esté activo...');
       Future.delayed(Duration(seconds: 35), () {
         debugPrint('🔍 Verificación: ¿El LocationService está enviando datos cada 30s?');
       });
       
-      // PASO 5: Mostrar mensaje de éxito al usuario
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -193,7 +257,6 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
     }
   }
 
-  // Método para forzar actualización de ubicación del usuario actual
   Future<void> _forceLocationUpdate() async {
     try {
       debugPrint('🚀 Forzando actualización de ubicación...');
@@ -201,7 +264,6 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
       if (position != null) {
         debugPrint('📍 Ubicación forzada obtenida: ${position.latitude}, ${position.longitude}');
         
-        // NUEVO: Guardar manualmente en user_locations para asegurar que aparezca inmediatamente
         final user = supabase.auth.currentUser;
         if (user != null) {
           final now = DateTime.now().toIso8601String();
@@ -220,7 +282,7 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
             });
             debugPrint('✅ Usuario forzado a aparecer en user_locations');
             
-            // También actualizar perfil
+
             await supabase.from('user_profiles').upsert({
               'id': user.id,
               'email': user.email,
@@ -284,10 +346,10 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
   }
 
   void _subscribeToPositions() {
-    // Cancelar suscripciones anteriores
+
     _cancelAllSubscriptions();
     
-    // Esperar un momento para asegurar que las suscripciones se cancelen
+
     Future.delayed(const Duration(milliseconds: 100), () {
       if (!mounted) return;
       
@@ -306,7 +368,7 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
               if (mounted) {
                 print('Recibidos ${data.length} puntos del proyecto $selectedProjectId');
                 
-                // Verificar que los datos pertenecen al proyecto correcto
+
                 final filteredData = data.where((position) {
                   final positionProjectId = position['project_id']?.toString();
                   return positionProjectId == selectedProjectId &&
@@ -346,35 +408,33 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
     try {
       print('🔄 Suscribiéndose a todas las ubicaciones de usuarios con actualización cada 30s');
       
-      // Función para cargar y combinar datos de ubicaciones
+
       void _loadAllUserLocations() async {
         try {
           final currentTime = DateTime.now();
           print('📡 [${currentTime.toString().substring(11, 19)}] Cargando ubicaciones de usuarios...');
           
-          // Obtener todos los perfiles de usuario
+
           final usersResponse = await supabase
               .from('user_profiles')
               .select('*');
           
-          // Obtener todas las ubicaciones actuales, ordenadas por timestamp
+
           final locationsResponse = await supabase
               .from('user_locations')
               .select('*')
               .order('updated_at', ascending: false);
           
           if (mounted) {
-            // Crear mapa de ubicaciones por user_id para acceso rápido
+
             final Map<String, Map<String, dynamic>> locationsByUserId = {};
             for (final location in locationsResponse) {
               final userId = location['user_id'];
-              // Solo tomar la ubicación más reciente de cada usuario
               if (!locationsByUserId.containsKey(userId)) {
                 locationsByUserId[userId] = location;
               }
             }
             
-            // Combinar usuarios con sus ubicaciones
             final List<Map<String, dynamic>> combinedData = [];
             final List<LatLng> positions = [];
             int onlineCount = 0;
@@ -390,24 +450,21 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
                 
                 totalUsersWithLocation++;
                 
-                // Verificar si el usuario está activo según user_profiles
                 bool isUserActive = user['is_online'] == true;
                 if (isUserActive) onlineCount++;
                 
-                // Agregar posición al mapa
                 positions.add(LatLng(
                   (location['latitude'] as num).toDouble(),
                   (location['longitude'] as num).toDouble(),
                 ));
-                
-                // Combinar datos de usuario y ubicación
+
                 combinedData.add({
                   ...location,
                   'username': user['username'] ?? 'Usuario',
                   'email': user['email'] ?? '',
-                  'is_online': isUserActive, // Usar estado de user_profiles
+                  'is_online': isUserActive, 
                   'user_id': userId,
-                  'timestamp': location['updated_at'], // Usar timestamp de la ubicación
+                  'timestamp': location['updated_at'],
                 });
               }
             }
@@ -431,7 +488,7 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
                   return userData['is_online'] == true;
                 }),
               );
-              _lastUpdateTime = currentTime; // Actualizar tiempo de última actualización
+              _lastUpdateTime = currentTime; 
             });
           }
         } catch (e) {
@@ -448,11 +505,10 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
         }
       }
       
-      // Cargar datos inicialmente
       _loadAllUserLocations();
-      
-      // Configurar timer para actualización automática cada 30 segundos
-      _locationUpdateTimer?.cancel(); // Cancelar timer anterior si existe
+    
+
+      _locationUpdateTimer?.cancel();
       _locationUpdateTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
         if (mounted && selectedProjectId == null) {
           print('⏰ Timer: Actualización automática de ubicaciones (cada 30s)');
@@ -463,27 +519,25 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
         }
       });
 
-      // También mantener suscripción en tiempo real para cambios inmediatos
       _userLocationsSubscription = supabase
           .from('user_locations')
           .stream(primaryKey: ['user_id'])
           .listen((data) {
         if (mounted && selectedProjectId == null) {
           print('🔔 Cambio en tiempo real detectado - Recargando ubicaciones');
-          _loadAllUserLocations(); // Recargar todo para mantener consistencia
+          _loadAllUserLocations(); 
         }
       }, onError: (error) {
         print('❌ Error en suscripción de ubicaciones: $error');
       });
 
-      // Suscripción a cambios en perfiles de usuario (estado online/offline)
       _userProfilesSubscription = supabase
           .from('user_profiles')
           .stream(primaryKey: ['id'])
           .listen((users) {
         if (mounted && selectedProjectId == null) {
           print('🔔 Cambio en perfiles detectado - Recargando ubicaciones');
-          _loadAllUserLocations(); // Recargar todo para mantener consistencia
+          _loadAllUserLocations(); 
         }
       }, onError: (error) {
         print('❌ Error en suscripción de perfiles: $error');
@@ -535,8 +589,7 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
   }
 
   void _onMapTap(LatLng position) async {
-    // Los puntos ya no se agregan tocando el mapa
-    // Se muestran instrucciones al usuario
+  
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Row(
@@ -555,7 +608,6 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
   }
 
   Future<void> _markCurrentLocation() async {
-    // Verificar si el usuario está activo/en línea
     if (currentUser?['is_online'] != true) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -593,7 +645,6 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
     }
 
     try {
-      // Verificar permisos de ubicación antes de continuar
       bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -652,7 +703,6 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
         return;
       }
 
-      // Mostrar indicador de carga
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Row(
@@ -673,10 +723,8 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
         ),
       );
 
-      // Obtener ubicación actual con alta precisión usando LocationService
       late Position position;
       try {
-        // Usar el LocationService para consistencia con dispositivos conectados
         final tempPosition = await locationService.getCurrentPosition();
         
         if (tempPosition == null) {
@@ -701,7 +749,6 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
         return;
       }
 
-      // Guardar el punto en la base de datos
       try {
         await supabase.from('positions').insert({
           'project_id': selectedProjectId != null
@@ -717,7 +764,6 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
 
         print('✅ Punto guardado en la base de datos');
 
-        // Agregar el punto localmente al mapa inmediatamente
         setState(() {
           devicePositions.add(LatLng(position.latitude, position.longitude));
           positionData.add({
@@ -731,7 +777,6 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
           });
         });
 
-        // Calcular área después de agregar el punto
         _calculateArea();
 
       } catch (e) {
@@ -749,7 +794,6 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
 
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
 
-      // Mostrar confirmación con información del punto
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Column(
@@ -778,7 +822,6 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
         ),
       );
 
-      // Centrar el mapa en la nueva ubicación
       _mapController.move(LatLng(position.latitude, position.longitude), 16.0);
     } catch (e) {
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
@@ -809,7 +852,6 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
   void _goToCurrentLocation() async {
     print('Centrando en última ubicación guardada');
     
-    // Mostrar indicador de carga simple
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -842,7 +884,6 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
       print('Usuario: ${user.id}');
       print('Consultando base de datos...');
 
-      // Obtener la última posición del usuario desde la base de datos
       final response = await supabase
           .from('user_locations')
           .select('latitude, longitude, updated_at')
@@ -854,7 +895,6 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
       print('Respuesta de user_locations: $response');
 
       if (response != null && response.isNotEmpty) {
-        // Validar que los campos existan y no sean nulos
         final latValue = response['latitude'];
         final lngValue = response['longitude'];
         final updatedAtValue = response['updated_at'];
@@ -869,21 +909,18 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
         double longitude = (lngValue as num).toDouble();
         String updatedAt = updatedAtValue.toString();
         
-        // Validar coordenadas
         if (latitude.isNaN || longitude.isNaN || (latitude == 0.0 && longitude == 0.0)) {
           print('ADVERTENCIA: Coordenadas inválidas: $latitude, $longitude');
           await _tryGPSLocation();
           return;
         }
         
-        // Calcular hace cuánto tiempo fue la última actualización
         DateTime lastUpdate = DateTime.parse(updatedAt);
         Duration timeDiff = DateTime.now().difference(lastUpdate);
         String timeAgo = _formatTimeAgo(timeDiff);
 
         print('Centrando en: $latitude, $longitude (actualizado $timeAgo)');
         
-        // Centrar el mapa en la ubicación
         _mapController.move(LatLng(latitude, longitude), 16.0);
         
         if (mounted) {
@@ -912,7 +949,6 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
       }
     } catch (e) {
       print('ERROR: Error al centrar ubicación: $e');
-      // Si falla la BD, intentar con GPS como fallback
       await _tryGPSLocation();
       if (mounted) {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
@@ -1017,9 +1053,8 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
 
   Future<void> _signOut() async {
     try {
-      // Detener servicios de ubicación antes de cerrar sesión
       locationService.dispose();
-      await backgroundLocationService.stopBackgroundTracking();
+      await SimpleBackgroundService.stopBackgroundTracking();
       await supabase.auth.signOut();
     } catch (e) {
       if (mounted) {
@@ -1285,7 +1320,7 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
                 Column(
                   children: [
                     Text(
-                      'Muestra usuarios activos/inactivos - Se actualiza cada 30s',
+                      'Se actualiza cada 30s',
                       style: TextStyle(
                         fontSize: 12,
                         color: Colors.grey[600],
@@ -1368,12 +1403,10 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
       if (selectedProjectId == null && index < positionData.length) {
         var data = positionData[index];
         
-        // Obtener información completa del usuario desde positionData (ya combinada)
         String username = data['username'] ?? 'Usuario ${index + 1}';
         bool isUserOnline = data['is_online'] == true;
         bool isCurrentUser = data['user_id'] == supabase.auth.currentUser?.id;
         
-        // Calcular tiempo desde la última actualización
         String timeInfo = '';
         if (data['timestamp'] != null) {
           try {
@@ -1394,13 +1427,11 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
           markerIcon = Icons.person_pin_circle;
           markerInfo = '🟢 ACTIVO: $username${timeInfo.isNotEmpty ? ' - $timeInfo' : ''}';
         } else {
-          // Usuario inactivo - mostrar en color rojo
           markerColor = Colors.red;
           markerIcon = Icons.location_off;
           markerInfo = '🔴 INACTIVO: $username${timeInfo.isNotEmpty ? ' - Última vez $timeInfo' : ''}';
         }
       } else {
-        // Puntos de proyecto
         markerInfo = '📌 PUNTO ${index + 1}';
         markerColor = Colors.purple;
         markerIcon = Icons.push_pin;
@@ -1557,17 +1588,15 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
           ),
         ),
         actions: [
-          if (selectedProjectId == null) // Solo mostrar en modo dispositivos
+          if (selectedProjectId == null) 
             IconButton(
               icon: const Icon(Icons.refresh),
               tooltip: 'Actualizar ubicaciones manualmente',
               onPressed: () async {
                 print('🔄 Actualización manual solicitada');
                 if (selectedProjectId == null) {
-                  // Forzar actualización de ubicación del usuario actual
                   await _forceLocationUpdate();
                   
-                  // Luego recargar todas las ubicaciones
                   _subscribeToAllDevices();
                   
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -1661,14 +1690,14 @@ class _TrackingPageImprovedState extends State<TrackingPageImproved> {
                 if (devicePositions.length > 2 && selectedProjectId != null)
                   PolygonLayer(
                     polygons: [
-                      // Sombra del polígono (capa inferior)
+
                       Polygon(
                         points: devicePositions,
                         borderStrokeWidth: 0,
                         borderColor: Colors.transparent,
                         color: Colors.orange.withOpacity(0.2),
                       ),
-                      // Polígono principal (capa superior)
+
                       Polygon(
                         points: devicePositions,
                         borderStrokeWidth: 4.0,

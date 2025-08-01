@@ -12,14 +12,14 @@ class LocationService {
   Timer? _locationTimer;
   bool _isTracking = false;
   
-  // Variables para optimización
+
   Position? _lastPosition;
   
-  // Configuración optimizada
-  static const int _updateIntervalSeconds = 30; // 30 segundos para consistencia
+
+  static const int _updateIntervalSeconds = 30; 
   static const LocationAccuracy _desiredAccuracy = LocationAccuracy.high;
 
-  // Inicializar permisos y servicios de ubicación
+
   Future<bool> initialize() async {
     try {
       print('🔍 Verificando servicios de ubicación...');
@@ -58,7 +58,7 @@ class LocationService {
     }
   }
 
-  // Iniciar seguimiento de ubicación con timer
+
   Future<void> startLocationTracking() async {
     if (_isTracking) {
       print('⚠️ LocationService ya está ejecutándose');
@@ -74,11 +74,11 @@ class LocationService {
 
     _isTracking = true;
     
-    // OBTENER UBICACIÓN INICIAL INMEDIATAMENTE
+
     print('📍 Obteniendo ubicación inicial...');
     await _updateLocationPeriodic();
     
-    // Configurar timer para actualizaciones periódicas cada 30 segundos
+
     _locationTimer = Timer.periodic(
       Duration(seconds: _updateIntervalSeconds), 
       (timer) {
@@ -95,7 +95,6 @@ class LocationService {
     print('✅ LocationService iniciado correctamente - Actualizaciones cada ${_updateIntervalSeconds}s');
   }
 
-  // Actualización periódica de ubicación
   Future<void> _updateLocationPeriodic() async {
     if (!_isTracking) {
       print('⚠️ LocationService no está activo, saltando actualización');
@@ -106,14 +105,13 @@ class LocationService {
       print('🎯 Obteniendo nueva posición GPS...');
       Position position = await Geolocator.getCurrentPosition(
         desiredAccuracy: _desiredAccuracy,
-        timeLimit: Duration(seconds: 10), // Timeout de 10 segundos
+        timeLimit: Duration(seconds: 10), 
       );
 
       print('📍 GPS obtenido: ${position.latitude}, ${position.longitude} (±${position.accuracy}m)');
       await _processNewPosition(position);
     } catch (e) {
       print('❌ Error obteniendo posición GPS: $e');
-      // Intentar con menor precisión como fallback
       try {
         print('🔄 Reintentando con menor precisión...');
         Position fallbackPosition = await Geolocator.getCurrentPosition(
@@ -128,19 +126,17 @@ class LocationService {
     }
   }
 
-  // Procesar nueva posición
+
   Future<void> _processNewPosition(Position position) async {
     print('🔄 Procesando nueva posición...');
     
-    // SIEMPRE guardar la posición cuando sea llamado por el timer
-    // Esto garantiza que las ubicaciones se envíen cada 30 segundos
+
     await _savePositionToDatabase(position);
     _lastPosition = position;
     
     print('✅ Posición procesada y guardada exitosamente');
   }
 
-  // Guardar posición en la base de datos
   Future<void> _savePositionToDatabase(Position position) async {
     try {
       final user = _supabase.auth.currentUser;
@@ -157,7 +153,6 @@ class LocationService {
       print('📍 Lng: ${position.longitude}');
       print('⏰ Tiempo: $now');
 
-      // SOLO GUARDAR EN user_locations - LA TABLA CRÍTICA
       try {
         print('🎯 Intentando UPSERT en user_locations...');
         
@@ -197,7 +192,6 @@ class LocationService {
         } catch (insertError) {
           print('💥 FALLO TOTAL: INSERT también falló: $insertError');
           
-          // ÚLTIMO RECURSO: Intentar UPDATE
           try {
             final updateResult = await _supabase
                 .from('user_locations')
@@ -221,7 +215,6 @@ class LocationService {
         }
       }
 
-      // TAMBIÉN actualizar perfil (secundario)
       try {
         await _supabase.from('user_profiles').upsert({
           'id': user.id,
@@ -242,7 +235,6 @@ class LocationService {
     }
   }
 
-  // Detener seguimiento
   Future<void> stopLocationTracking() async {
     _isTracking = false;
     _locationTimer?.cancel();
@@ -253,7 +245,6 @@ class LocationService {
     }
   }
 
-  // Obtener posición actual una sola vez (optimizado para UI)
   Future<Position?> getCurrentPosition() async {
     try {
       print('🎯 Iniciando getCurrentPosition...');
@@ -266,7 +257,6 @@ class LocationService {
 
       print('🔍 LocationService inicializado, obteniendo posición...');
 
-      // Estrategia 1: Intentar obtener la última posición conocida primero (muy rápido)
       try {
         print('📱 Intentando obtener última posición conocida...');
         Position? lastKnown = await Geolocator.getLastKnownPosition();
@@ -276,7 +266,6 @@ class LocationService {
           
           print('⏰ Última posición: ${timeDiff.inSeconds} segundos de antigüedad');
           
-          // Si la última posición es reciente (menos de 2 minutos), usarla
           if (timeDiff.inMinutes < 2) {
             print('✅ Usando última posición conocida: ${lastKnown.latitude}, ${lastKnown.longitude}');
             return lastKnown;
@@ -290,16 +279,15 @@ class LocationService {
         print('⚠️ Error obteniendo última posición conocida: $e');
       }
 
-      // Estrategia 2: Obtener posición actual con diferentes niveles de precisión
       List<LocationAccuracy> accuracyLevels = [
-        LocationAccuracy.medium,    // Rápido y generalmente suficiente
-        LocationAccuracy.low,       // Muy rápido como fallback
-        LocationAccuracy.lowest,    // Último recurso
+        LocationAccuracy.medium,   
+        LocationAccuracy.low,       
+        LocationAccuracy.lowest,   
       ];
 
       for (int i = 0; i < accuracyLevels.length; i++) {
         LocationAccuracy accuracy = accuracyLevels[i];
-        int timeoutSeconds = 5 + (i * 5); // 5, 10, 15 segundos
+        int timeoutSeconds = 5 + (i * 5); 
         
         try {
           print('🎯 Intento ${i + 1}/3 - Precisión: $accuracy, Timeout: ${timeoutSeconds}s');
@@ -319,7 +307,6 @@ class LocationService {
         } catch (e) {
           print('❌ Intento ${i + 1} falló con $accuracy: $e');
           if (i == accuracyLevels.length - 1) {
-            // Último intento falló
             print('💥 Todos los intentos de obtener posición fallaron');
           } else {
             print('🔄 Intentando con menor precisión...');
@@ -336,12 +323,10 @@ class LocationService {
     }
   }
 
-  // Limpiar recursos
   void dispose() {
     stopLocationTracking();
   }
 
-  // Getters para estado
   bool get isTracking => _isTracking;
   Position? get lastKnownPosition => _lastPosition;
 }

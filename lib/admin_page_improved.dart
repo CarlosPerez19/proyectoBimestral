@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import 'tracking_page_improved.dart';
-import 'main.dart'; // Para AuthGate
+import 'main.dart'; 
 
 class AdminPageImproved extends StatefulWidget {
   const AdminPageImproved({super.key});
@@ -20,7 +20,6 @@ class _AdminPageImprovedState extends State<AdminPageImproved> with TickerProvid
   List<Map<String, dynamic>> projects = [];
   bool isLoading = true;
   
-  // Timer para actualizar ubicaciones cada 30 segundos
   Timer? _locationUpdateTimer;
 
   @override
@@ -28,13 +27,13 @@ class _AdminPageImprovedState extends State<AdminPageImproved> with TickerProvid
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
     _loadData();
-    _startLocationUpdateTimer(); // Iniciar timer automático
+    _startLocationUpdateTimer(); 
   }
 
   @override
   void dispose() {
     _tabController.dispose();
-    _locationUpdateTimer?.cancel(); // Cancelar timer al salir
+    _locationUpdateTimer?.cancel(); 
     super.dispose();
   }
 
@@ -46,13 +45,12 @@ class _AdminPageImprovedState extends State<AdminPageImproved> with TickerProvid
     ]);
   }
 
-  // Método para iniciar el timer de actualización automática cada 30 segundos
   void _startLocationUpdateTimer() {
     _locationUpdateTimer = Timer.periodic(const Duration(seconds: 30), (timer) async {
       print('🔄 AdminPage: Actualizando ubicaciones automáticamente');
-      await _loadOnlineUsers(); // Recargar usuarios online cada 30 segundos
+      await _loadOnlineUsers(); 
       if (mounted) {
-        setState(() {}); // Forzar actualización de la UI
+        setState(() {}); 
       }
     });
     print('⏰ AdminPage: Timer de actualización iniciado (30 segundos)');
@@ -60,17 +58,15 @@ class _AdminPageImprovedState extends State<AdminPageImproved> with TickerProvid
 
   Future<void> _loadUsers() async {
     try {
-      // Cargar perfiles
+
       final profiles = await supabase
           .from('user_profiles')
           .select('*');
       
-      // Cargar roles
       final roles = await supabase
           .from('user_roles')
           .select('*');
       
-      // Combinar datos manualmente de forma simple
       final combinedUsers = <Map<String, dynamic>>[];
       
       for (final profile in profiles) {
@@ -108,14 +104,13 @@ class _AdminPageImprovedState extends State<AdminPageImproved> with TickerProvid
   Future<void> _loadOnlineUsers() async {
     try {
       print('🔄 AdminPage: Cargando usuarios online...');
-      // Obtener ubicaciones activas con información del usuario
+
       final locations = await supabase
           .from('user_locations')
           .select('*, user_profiles!inner(*)')
           .not('latitude', 'is', null)
           .not('longitude', 'is', null);
 
-      // Cargar roles para los usuarios online
       final userIds = locations.map((loc) => loc['user_id']).toList();
       final roles = userIds.isNotEmpty 
           ? await supabase
@@ -124,7 +119,6 @@ class _AdminPageImprovedState extends State<AdminPageImproved> with TickerProvid
               .filter('user_id', 'in', '(${userIds.map((id) => "'$id'").join(',')})')
           : <Map<String, dynamic>>[];
 
-      // Combinar datos de ubicación, perfil y rol
       final combinedData = locations.map((location) {
         final userRole = roles.firstWhere(
           (role) => role['user_id'] == location['user_id'],
@@ -282,7 +276,6 @@ class _AdminPageImprovedState extends State<AdminPageImproved> with TickerProvid
                     passwordController.text.isNotEmpty &&
                     usernameController.text.isNotEmpty) {
                   try {
-                    // Crear usuario con Supabase Auth
                     final response = await supabase.auth.signUp(
                       email: emailController.text.trim(),
                       password: passwordController.text,
@@ -293,7 +286,6 @@ class _AdminPageImprovedState extends State<AdminPageImproved> with TickerProvid
                     );
 
                     if (response.user != null) {
-                      // Crear perfil sin role (va en tabla separada)
                       await supabase.from('user_profiles').upsert({
                         'id': response.user!.id,
                         'email': emailController.text.trim(),
@@ -301,7 +293,6 @@ class _AdminPageImprovedState extends State<AdminPageImproved> with TickerProvid
                         'is_online': true,
                       });
 
-                      // Crear rol en tabla separada
                       await supabase.from('user_roles').upsert({
                         'user_id': response.user!.id,
                         'role': selectedRole,
@@ -456,7 +447,6 @@ class _AdminPageImprovedState extends State<AdminPageImproved> with TickerProvid
     String newRole = user['role'] == 'admin' ? 'user' : 'admin';
     
     try {
-      // Actualizar en la tabla user_roles en lugar de user_profiles
       await supabase
           .from('user_roles')
           .update({'role': newRole})
@@ -555,7 +545,7 @@ class _AdminPageImprovedState extends State<AdminPageImproved> with TickerProvid
           ),
           const SizedBox(height: 20),
           
-          // Tarjetas de estadísticas
+
           GridView.count(
             crossAxisCount: 2,
             shrinkWrap: true,
@@ -598,120 +588,7 @@ class _AdminPageImprovedState extends State<AdminPageImproved> with TickerProvid
           ),
           
           const SizedBox(height: 24),
-          
-          // Dispositivos conectados en tiempo real
-          Card(
-            elevation: 4,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.devices, color: Colors.blue),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Dispositivos Conectados: ${onlineUsers.length}',
-                        style: const TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const Spacer(),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: Colors.green,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 8,
-                              height: 8,
-                              decoration: const BoxDecoration(
-                                color: Colors.white,
-                                shape: BoxShape.circle,
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                            const Text(
-                              'EN VIVO',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 10,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  if (onlineUsers.isEmpty)
-                    const Center(
-                      child: Column(
-                        children: [
-                          Icon(Icons.location_off, size: 48, color: Colors.grey),
-                          SizedBox(height: 8),
-                          Text(
-                            'No hay dispositivos conectados',
-                            style: TextStyle(color: Colors.grey),
-                          ),
-                          SizedBox(height: 4),
-                          Text(
-                            'Se actualiza automáticamente cada 30 segundos',
-                            style: TextStyle(fontSize: 12, color: Colors.grey),
-                          ),
-                        ],
-                      ),
-                    )
-                  else
-                    Column(
-                      children: onlineUsers.take(5).map((user) {
-                        final username = user['user_profiles']?['username'] ?? 'Usuario';
-                        final coords = '${user['latitude'].toStringAsFixed(6)}, ${user['longitude'].toStringAsFixed(6)}';
-                        final accuracy = user['accuracy']?.toStringAsFixed(1) ?? 'N/A';
-                        final lastSeen = user['last_seen'] != null 
-                            ? DateTime.parse(user['last_seen']).toLocal().toString().substring(11, 19)
-                            : 'N/A';
-                        
-                        return ListTile(
-                          leading: CircleAvatar(
-                            backgroundColor: Colors.green[100],
-                            child: const Icon(Icons.person_pin_circle, color: Colors.green),
-                          ),
-                          title: Text(username),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('📍 $coords'),
-                              Text('🎯 Precisión: ${accuracy}m • 🕒 $lastSeen'),
-                            ],
-                          ),
-                          trailing: Container(
-                            width: 12,
-                            height: 12,
-                            decoration: const BoxDecoration(
-                              color: Colors.green,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          isThreeLine: true,
-                        );
-                      }).toList(),
-                    ),
-                ],
-              ),
-            ),
-          ),
-         
-          const SizedBox(height: 24),
-         
-          // Proyectos recientes
+                 
           Card(
             elevation: 4,
             child: Padding(

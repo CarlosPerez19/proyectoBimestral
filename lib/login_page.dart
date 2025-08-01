@@ -32,7 +32,6 @@ class _LoginPageState extends State<LoginPage> {
     try {
       setState(() => isLoading = true);
       
-      // Validar campos
       if (emailController.text.isEmpty || passwordController.text.isEmpty) {
         _showError('Por favor llena todos los campos');
         return;
@@ -67,7 +66,6 @@ class _LoginPageState extends State<LoginPage> {
     try {
       setState(() => isLoading = true);
       
-      // Validar campos
       if (emailController.text.isEmpty || 
           passwordController.text.isEmpty || 
           usernameController.text.isEmpty) {
@@ -75,13 +73,11 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      // Validar username
       if (usernameController.text.length < 3) {
         _showError('El nombre de usuario debe tener al menos 3 caracteres');
         return;
       }
 
-      // Validar contraseña
       if (passwordController.text.length < 6) {
         _showError('La contraseña debe tener al menos 6 caracteres');
         return;
@@ -89,7 +85,6 @@ class _LoginPageState extends State<LoginPage> {
 
       _showLoadingMessage('Creando cuenta...');
 
-      // Registrar usuario con metadatos
       final response = await supabase.auth.signUp(
         email: emailController.text.trim(),
         password: passwordController.text,
@@ -102,15 +97,12 @@ class _LoginPageState extends State<LoginPage> {
       if (response.user != null) {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         
-        // Esperar un momento para que el trigger procese
         await Future.delayed(const Duration(milliseconds: 1000));
         
-        // Crear perfil manualmente como respaldo
         await _createUserProfile(response.user!);
         
         _showSuccess('¡Cuenta creada exitosamente!');
         
-        // Cambiar automáticamente a modo login
         if (mounted) {
           setState(() {
             isLogin = true;
@@ -138,7 +130,6 @@ class _LoginPageState extends State<LoginPage> {
         print('Role: $selectedRole');
       }
 
-      // Crear perfil en user_profiles (sin role)
       await supabase.from('user_profiles').upsert({
         'id': user.id,
         'email': user.email,
@@ -146,7 +137,6 @@ class _LoginPageState extends State<LoginPage> {
         'is_online': false,
       });
 
-      // Crear role en tabla separada user_roles
       await supabase.from('user_roles').upsert({
         'user_id': user.id,
         'role': selectedRole,
@@ -156,7 +146,6 @@ class _LoginPageState extends State<LoginPage> {
         print('Perfil y rol creados manualmente exitosamente');
       }
 
-      // Verificar que se creó correctamente
       final profile = await supabase
           .from('user_profiles')
           .select()
@@ -167,7 +156,6 @@ class _LoginPageState extends State<LoginPage> {
         print('Perfil verificado: $profile');
       }
 
-      // Si el rol no se asignó correctamente, usar función SQL
       if (profile['role'] != selectedRole) {
         if (kDebugMode) {
           print('Rol incorrecto, usando función SQL para corrección...');
@@ -183,7 +171,7 @@ class _LoginPageState extends State<LoginPage> {
       if (kDebugMode) {
         print('Error creando perfil manual: $e');
       }
-      // No lanzar error aquí para no interrumpir el registro
+
     }
   }
 
@@ -289,7 +277,6 @@ class _LoginPageState extends State<LoginPage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Logo o icono
                     Container(
                       width: 80,
                       height: 80,
@@ -304,8 +291,7 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                     const SizedBox(height: 20),
-                    
-                    // Título
+
                     Text(
                       isLogin ? 'Iniciar Sesión' : 'Crear Cuenta',
                       style: Theme.of(context).textTheme.headlineSmall?.copyWith(
@@ -324,7 +310,6 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 30),
 
-                    // Campo Username (solo en registro)
                     if (!isLogin) ...[
                       TextField(
                         controller: usernameController,
@@ -349,7 +334,6 @@ class _LoginPageState extends State<LoginPage> {
                       const SizedBox(height: 16),
                     ],
 
-                    // Campo Email
                     TextField(
                       controller: emailController,
                       enabled: !isLoading,
@@ -373,7 +357,6 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Campo Contraseña
                     TextField(
                       controller: passwordController,
                       enabled: !isLoading,
@@ -396,7 +379,6 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
 
-                    // Selector de rol (solo en registro)
                     if (!isLogin) ...[
                       const SizedBox(height: 20),
                       Container(
@@ -468,7 +450,6 @@ class _LoginPageState extends State<LoginPage> {
 
                     const SizedBox(height: 30),
 
-                    // Botón principal
                     SizedBox(
                       width: double.infinity,
                       height: 50,
@@ -503,12 +484,10 @@ class _LoginPageState extends State<LoginPage> {
 
                     const SizedBox(height: 20),
 
-                    // Toggle entre login y registro
                     TextButton(
                       onPressed: isLoading ? null : () {
                         setState(() {
                           isLogin = !isLogin;
-                          // Limpiar campos al cambiar
                           passwordController.clear();
                           if (isLogin) {
                             usernameController.clear();
@@ -537,7 +516,6 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
 
-                    // Debug info (solo en modo debug)
                     if (kDebugMode && !isLogin) ...[
                       const SizedBox(height: 20),
                       Container(
